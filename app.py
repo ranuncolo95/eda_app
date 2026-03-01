@@ -1,8 +1,17 @@
 import streamlit as st
 import pandas as pd
 import plotly.colors as plc
+from pathlib import Path
 
-from data_sources import ISLP_DATASETS, load_islp_dataset
+from data_sources import (
+    ISLP_DATASETS,
+    load_islp_dataset,
+    load_csv_uploaded,
+    download_kaggle_dataset_to_tempdir,
+    list_csv_files_in_dir,
+    load_csv_from_path,
+)
+
 from profiling import (
     EDA_TYPES,
     columns_by_eda_type,
@@ -123,10 +132,171 @@ def init_state():
 init_state()
 
 # ---------------------------
-# Dataset selection
+# Dataset selection (multi-source)
 # ---------------------------
-dataset_name = st.sidebar.selectbox("Dataset ISLP", ISLP_DATASETS)
-df = get_dataset(dataset_name)
+st.sidebar.header("Sorgente dati")
+
+source_type = st.sidebar.radio(
+    "Origine dataset",
+    ["ISLP", "CSV Upload", "Kaggle (link)"],
+    index=0,
+)
+
+df = None
+dataset_name = None
+dataset_label_for_state = None
+
+# ---- ISLP ----
+if source_type == "ISLP":
+    dataset_name = st.sidebar.selectbox("Dataset ISLP", ISLP_DATASETS)
+    df = get_dataset(dataset_name)
+    dataset_label_for_state = f"ISLP::{dataset_name}"
+
+# ---- CSV Upload ----
+elif source_type == "CSV Upload":
+    uploaded_file = st.sidebar.file_uploader(
+        "Carica file CSV",
+        type=["csv"],
+        accept_multiple_files=False,
+    )
+
+    with st.sidebar.expander("Opzioni CSV", expanded=False):
+        csv_sep = st.text_input("Separatore", value=",")
+        csv_encoding = st.text_input("Encoding", value="utf-8")
+        csv_decimal = st.text_input("Decimale", value=".")
+        csv_nrows = st.number_input("Leggi solo prime N righe (0=tutte)", min_value=0, value=0, step=1000)
+
+    if uploaded_file is not None:
+        try:
+            read_kwargs = {
+                "sep": csv_sep,
+                "encoding": csv_encoding,
+                "decimal": csv_decimal,
+            }
+            if csv_nrows > 0:
+                read_kwargs["nrows"] = int(csv_nrows)
+
+            df = load_csv_uploaded(uploaded_file, **read_kwargs)
+            dataset_name = uploaded_file.name
+            dataset_label_for_state = f"CSV::{uploaded_file.name}"
+            st.sidebar.success(f"CSV caricato: {uploaded_file.name}")
+        except Exception as e:
+            st.sidebar.error(f"Errore caricamento CSV: {e}")
+
+# ---- Kaggle ----
+elif source_type == "Kaggle (link)":
+    # Root progetto = directory dove sta app.py
+    project_root = Path(__file__).resolve().parent
+    kaggle_json_path = project_root / "kaggle.json"
+
+    kaggle_url = st.sidebar.text_input(
+        "Link Kaggle dataset (o slug owner/dataset)",
+        placeholder="https://www.kaggle.com/datasets/owner/dataset-name",
+        key="kaggle_url_input",
+    )
+
+    st.sidebar.markdown("**Credenziali Kaggle API**")
+    if kaggle_json_path.exists():
+        st.sidebar.success(f"kaggle.json trovato in: {kaggle_json_path}")
+    else:
+        st.sidebar.error(
+            f"kaggle.json non trovato in root progetto: {kaggle_json_path}\n\n"
+            "Crea il file con formato:\n"
+            '{"username":"username","key":"key"}'
+        )
+
+    with st.sidebar.expander("Opzioni CSV (post-download)", expanded=False):
+        kg_csv_sep = st.text_input("Separatore CSV", value=",", key="kg_sep")
+        kg_csv_encoding = st.text_input("Encoding CSV", value="utf-8", key="kg_enc")
+        kg_csv_decimal = st.text_input("Decimale CSV", value=".", key="kg_dec")
+        kg_csv_nrows = st.number_input(
+            "Leggi solo prime N righe (0=tutte)",
+            min_value=0,
+            value=0,
+            step=1000,
+            key="kg_nrows",
+        )
+
+    # Download dataset Kaggle
+    if st.sidebar.button("Scarica dataset Kaggle", width="stretch", key="kaggle_download_btn"):
+        if not kaggle_url.strip():
+            st.sidebar.error("Inserisci un link Kaggle o uno slug owner/dataset.")
+        elif not kaggle_json_path.exists():
+            st.sidebar.error(f"kaggle.json non trovato in: {kaggle_json_path}")
+        else:
+            try:
+                slug, tmpdir = download_kaggle_dataset_to_tempdir(
+                    kaggle_url,
+                    kaggle_json_path=kaggle_json_path,
+                )
+                csv_files = list_csv_files_in_dir(tmpdir)
+
+                # Salva in session_state per i rerun
+                st.session_state["kaggle_tmpdir"] = tmpdir
+                st.session_state["kaggle_slug"] = slug
+                st.session_state["kaggle_csv_files"] = csv_files
+
+                # Reset eventuale dataframe Kaggle già caricato (se cambi dataset)
+                st.session_state.pop("loaded_df", None)
+                st.session_state.pop("loaded_dataset_name", None)
+                st.session_state.pop("loaded_dataset_label", None)
+
+                if not csv_files:
+                    st.sidebar.warning("Dataset scaricato, ma non ho trovato file CSV.")
+                else:
+                    st.sidebar.success(f"Dataset scaricato: {slug} ({len(csv_files)} CSV trovati)")
+            except Exception as e:
+                st.sidebar.error(f"Errore download Kaggle: {e}")
+
+    # Se già scaricato, mostra selezione CSV
+    kaggle_csv_files = st.session_state.get("kaggle_csv_files", [])
+    kaggle_slug = st.session_state.get("kaggle_slug")
+
+    if kaggle_csv_files:
+        selected_csv = st.sidebar.selectbox(
+            "CSV nel dataset Kaggle",
+            kaggle_csv_files,
+            key="kaggle_selected_csv",
+        )
+
+        if st.sidebar.button(
+            "Carica CSV selezionato",
+            width="stretch",
+            key="kaggle_load_selected_csv_btn",
+        ):
+            try:
+                read_kwargs = {
+                    "sep": kg_csv_sep,
+                    "encoding": kg_csv_encoding,
+                    "decimal": kg_csv_decimal,
+                }
+                if kg_csv_nrows > 0:
+                    read_kwargs["nrows"] = int(kg_csv_nrows)
+
+                df = load_csv_from_path(selected_csv, **read_kwargs)
+                dataset_name = f"{kaggle_slug} :: {Path(selected_csv).name}"
+                dataset_label_for_state = f"KAGGLE::{kaggle_slug}::{Path(selected_csv).name}"
+
+                # Persisti per rerun Streamlit
+                st.session_state["loaded_df"] = df
+                st.session_state["loaded_dataset_name"] = dataset_name
+                st.session_state["loaded_dataset_label"] = dataset_label_for_state
+
+                st.sidebar.success(f"Caricato: {Path(selected_csv).name}")
+            except Exception as e:
+                st.sidebar.error(f"Errore caricamento CSV dal dataset Kaggle: {e}")
+
+    # Ripristino DF dopo rerun Streamlit
+    if df is None and source_type == "Kaggle (link)" and "loaded_df" in st.session_state:
+        df = st.session_state["loaded_df"]
+        dataset_name = st.session_state.get("loaded_dataset_name", "Kaggle dataset")
+        dataset_label_for_state = st.session_state.get("loaded_dataset_label", f"KAGGLE::{dataset_name}")
+
+# Se non c'è ancora df, fermiamo la pagina prima del resto della pipeline EDA
+if df is None:
+    st.info("Seleziona una sorgente dati e carica un dataset per iniziare.")
+    st.stop()
+
 
 # Reset override se cambio dataset (opzionale ma consigliato)
 if st.session_state.get("_last_dataset") != dataset_name:
