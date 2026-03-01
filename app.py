@@ -160,7 +160,7 @@ with st.sidebar.expander("Gestione tipi colonne", expanded=False):
 
         st.write(f"**EDA corrente:** `{resolved_types[col_to_edit]}`")
         st.write("**Anteprima valori:**")
-        st.dataframe(df[[col_to_edit]].head(10), use_container_width=True)
+        st.dataframe(df[[col_to_edit]].head(10), width="stretch")
 
         type_options = ["auto"] + EDA_TYPES
         selected_type = st.selectbox(
@@ -171,18 +171,18 @@ with st.sidebar.expander("Gestione tipi colonne", expanded=False):
         )
 
         b1, b2, b3 = st.columns(3)
-        if b1.button("Applica", use_container_width=True):
+        if b1.button("Applica", width="stretch"):
             if selected_type == "auto":
                 st.session_state["type_overrides"].pop(col_to_edit, None)
             else:
                 st.session_state["type_overrides"][col_to_edit] = selected_type
             st.rerun()
 
-        if b2.button("Reset colonna", use_container_width=True):
+        if b2.button("Reset colonna", width="stretch"):
             st.session_state["type_overrides"].pop(col_to_edit, None)
             st.rerun()
 
-        if b3.button("Reset tutti", use_container_width=True):
+        if b3.button("Reset tutti", width="stretch"):
             st.session_state["type_overrides"] = {}
             st.rerun()
 
@@ -205,306 +205,319 @@ tab_overview, tab_plot = st.tabs(["Overview", "Plot"])
 
 with tab_overview:
     st.subheader("Preview dati")
-    st.dataframe(df.head(20), use_container_width=True)
+    st.dataframe(df.head(20), width="stretch")
 
     st.subheader("Profilo colonne")
     profile_df = build_column_profile_table(df, st.session_state["type_overrides"])
-    st.dataframe(profile_df, use_container_width=True)
+    st.dataframe(profile_df, width="stretch")
 
     with st.expander("Report conversioni per plotting (debug)", expanded=False):
         conv_df = pd.DataFrame(
             [{"column": k, "plot_cast": v} for k, v in conversion_report.items()]
         )
-        st.dataframe(conv_df, use_container_width=True)
+        st.dataframe(conv_df, width="stretch")
 
 # ---------------------------
 # Main: plot
 # ---------------------------
 with tab_plot:
-    st.subheader("Grafico")
-
-    # Controllo UI per altezza del grafico
-    chart_height_user = st.slider(
-        "Altezza grafico (px)",
-        min_value=500,
-        max_value=1600,
-        value=800,
-        step=50,
-        help="Aumenta l'altezza per facet / marginal plot per evitare grafici schiacciati."
-    )
-
-    chart_type = st.selectbox(
-        "Tipo grafico",
-        [
-            "Histogram",
-            "Count Bar",
-            "Pareto",
-            "Boxplot",
-            "Scatter",
-            "Scatter Matrix",
-            "Correlation Heatmap",
-        ],
-    )
+    # Layout a due colonne: controlli (sinistra) + grafico (destra)
+    controls_col, plot_col = st.columns([0.8, 3.2], gap="large")
 
     fig = None
     code_snippet = None
 
-    if chart_type == "Histogram":
-        if not num_cols:
-            st.warning("Nessuna colonna numerica disponibile (in base ai tipi EDA correnti).")
-        else:
-            x = st.selectbox("Variabile numerica (x)", num_cols)
-            color = st.selectbox("Color (opzionale)", [None] + cat_like_cols)
-            hist_color_map = categorical_color_map_ui(df_plot, color, key_prefix="hist")
-            nbins = st.slider("Bins", 5, 100, 30)
+    with controls_col:
+        st.subheader("Opzioni grafico")
 
-            histnorm_ui = st.selectbox(
-                "Normalizzazione",
-                ["count", "percent", "probability", "density", "probability density"],
-                index=0,
-                help="count = frequenze assolute; percent/probability = frequenze relative; density/probability density = densità",
-            )
-            histnorm = None if histnorm_ui == "count" else histnorm_ui
+        chart_height_user = st.slider(
+            "Altezza grafico (px)",
+            min_value=500,
+            max_value=1600,
+            value=800,
+            step=50,
+            help="Aumenta l'altezza per facet / marginal plot per evitare grafici schiacciati."
+        )
 
-            marginal_ui = st.selectbox(
-                "Marginal mode",
-                ["box", "violin", "rug", "none"],
-                index=0,
-                help="Grafico marginale sopra l'istogramma (per x=...).",
-            )
-            marginal_mode = None if marginal_ui == "none" else marginal_ui
+        chart_type = st.selectbox(
+            "Tipo grafico",
+            [
+                "Histogram",
+                "Count Bar",
+                "Pareto",
+                "Boxplot",
+                "Scatter",
+                "Scatter Matrix",
+                "Correlation Heatmap",
+            ],
+        )
 
-            opacity = 0.75
-            barmode = "overlay"
+        if chart_type == "Histogram":
+            if not num_cols:
+                st.warning("Nessuna colonna numerica disponibile (in base ai tipi EDA correnti).")
+            else:
+                x = st.selectbox("Variabile numerica (x)", num_cols)
+                color = st.selectbox("Color (opzionale)", [None] + cat_like_cols)
+                hist_color_map = categorical_color_map_ui(df_plot, color, key_prefix="hist")
+                nbins = st.slider("Bins", 5, 100, 30)
 
-            if color is not None:
-                barmode = st.selectbox(
-                    "Bar mode",
-                    ["overlay", "group", "relative", "stack"],
+                histnorm_ui = st.selectbox(
+                    "Normalizzazione",
+                    ["count", "percent", "probability", "density", "probability density"],
                     index=0,
-                    help="overlay = sovrapposto; group = affiancato; relative/stack = impilato.",
+                    help="count = frequenze assolute; percent/probability = frequenze relative; density/probability density = densità",
                 )
-                opacity = st.slider("Opacità overlay", 0.05, 1.00, 0.55, 0.05)
+                histnorm = None if histnorm_ui == "count" else histnorm_ui
 
-            fig = build_histogram(
-                df_plot,
-                x=x,
-                nbins=nbins,
-                color=color,
-                opacity=opacity,
-                histnorm=histnorm,
-                marginal_mode=marginal_mode,
-                barmode=barmode,
-                color_discrete_map=hist_color_map,
+                marginal_ui = st.selectbox(
+                    "Marginal mode",
+                    ["box", "violin", "rug", "none"],
+                    index=0,
+                    help="Grafico marginale sopra l'istogramma (per x=...).",
+                )
+                marginal_mode = None if marginal_ui == "none" else marginal_ui
 
-            )
+                opacity = 0.75
+                barmode = "overlay"
 
-            code_snippet = histogram_code(
-                x=x,
-                nbins=nbins,
-                color=color,
-                opacity=opacity,
-                histnorm=histnorm,
-                marginal_mode=marginal_mode,
-                barmode=barmode,
-                color_discrete_map=hist_color_map,
+                if color is not None:
+                    barmode = st.selectbox(
+                        "Bar mode",
+                        ["overlay", "group", "relative", "stack"],
+                        index=0,
+                        help="overlay = sovrapposto; group = affiancato; relative/stack = impilato.",
+                    )
+                    opacity = st.slider("Opacità overlay", 0.05, 1.00, 0.55, 0.05)
 
-            )
-
-    elif chart_type == "Count Bar":
-        if not cat_like_cols:
-            st.warning("Nessuna colonna categorica/string/boolean disponibile.")
-        else:
-            x = st.selectbox("Variabile categorica", cat_like_cols)
-            top_k = st.slider("Top K categorie", 5, 100, 20)
-
-            fig = build_count_bar(df_plot, x=x, top_k=top_k)
-            code_snippet = count_bar_code(x=x, top_k=top_k)
-
-    elif chart_type == "Pareto":
-        if not cat_like_cols:
-            st.warning("Nessuna colonna categorica/string/boolean disponibile.")
-        else:
-            x = st.selectbox("Variabile categorica", cat_like_cols)
-            top_k = st.slider("Top K categorie", 5, 100, 20)
-
-            fig = build_pareto(df_plot, x=x, top_k=top_k)
-            code_snippet = pareto_code(x=x, top_k=top_k)
-
-    elif chart_type == "Boxplot":
-        if not num_cols:
-            st.warning("Nessuna colonna numerica disponibile.")
-        else:
-            y = st.selectbox("Variabile numerica (y)", num_cols)
-            x_group = st.selectbox("Grouping (opzionale, cat/string/bool)", [None] + cat_like_cols)
-
-            fig = build_boxplot(df_plot, y=y, x=x_group)
-            code_snippet = boxplot_code(y=y, x_group=x_group)
-
-    elif chart_type == "Scatter":
-        if len(num_cols) < 2:
-            st.warning("Servono almeno 2 colonne numeriche.")
-        else:
-            x = st.selectbox("X (numerica)", num_cols)
-            y_candidates = [c for c in num_cols if c != x]
-            y = st.selectbox("Y (numerica)", y_candidates)
-
-            facet_candidates = [None] + cat_like_cols
-            color = st.selectbox("Color (opzionale)", facet_candidates)
-            scatter_color_map = categorical_color_map_ui(df_plot, color, key_prefix="scatter")
-            facet_col = st.selectbox("Facet col (opzionale)", facet_candidates)
-            facet_row = st.selectbox("Facet row (opzionale)", facet_candidates)
-
-            if facet_row is not None and facet_col is not None and facet_row == facet_col:
-                st.warning("Facet row e facet col non dovrebbero essere la stessa colonna.")
-
-            opacity = st.slider("Opacità punti", 0.05, 1.00, 0.30, 0.05)
-
-            facet_col_wrap = None
-            if facet_col is not None and facet_row is None:
-                use_wrap = st.checkbox("Usa facet_col_wrap", value=False)
-                if use_wrap:
-                    facet_col_wrap = st.slider("Facet col wrap", 2, 6, 3)
-
-            sample_n = st.number_input("Sample max (0 = no sample)", min_value=0, value=3000, step=100)
-            sample_n = None if sample_n == 0 else int(sample_n)
-
-            too_many = []
-            for fc_name, fc_val in [("facet_col", facet_col), ("facet_row", facet_row)]:
-                if fc_val is not None:
-                    n_levels = int(df_plot[fc_val].astype("string").nunique(dropna=True))
-                    if n_levels > 12:
-                        too_many.append((fc_name, fc_val, n_levels))
-
-            if too_many:
-                msg = " | ".join([f"{n}='{c}' ha {k} livelli" for n, c, k in too_many])
-                st.warning(f"Attenzione: troppi facet possono rendere il grafico poco leggibile ({msg}).")
-
-            fig = build_scatter(
-                df_plot,
-                x=x,
-                y=y,
-                color=color,
-                facet_col=facet_col,
-                facet_row=facet_row,
-                facet_col_wrap=facet_col_wrap,
-                opacity=opacity,
-                sample_n=sample_n,
-                color_discrete_map=scatter_color_map,
-
-            )
-            code_snippet = scatter_code(
-                x=x,
-                y=y,
-                color=color,
-                facet_col=facet_col,
-                facet_row=facet_row,
-                facet_col_wrap=facet_col_wrap,
-                opacity=opacity,
-                sample_n=sample_n,
-                color_discrete_map=scatter_color_map,
-
-            )
-
-    elif chart_type == "Scatter Matrix":
-        if len(num_cols) < 2:
-            st.warning("Servono almeno 2 colonne numeriche.")
-        else:
-            default_cols = num_cols[: min(5, len(num_cols))]
-            cols = st.multiselect(
-                "Colonne numeriche (2-8 consigliate)",
-                num_cols,
-                default=default_cols,
-                help="Troppe colonne rendono la scatter matrix lenta e poco leggibile.",
-            )
-
-            color = st.selectbox("Color (opzionale)", [None] + cat_like_cols)
-            matrix_color_map = categorical_color_map_ui(df_plot, color, key_prefix="scatter_matrix")
-
-            opacity = st.slider("Opacità punti (matrix)", 0.05, 1.00, 0.35, 0.05)
-
-            diagonal_visible = st.checkbox("Mostra diagonale", value=True)
-            show_upper_half = st.checkbox("Mostra triangolo superiore", value=False)
-
-            sample_n = st.number_input(
-                "Sample max (0 = no sample)",
-                min_value=0,
-                value=2000,
-                step=100,
-                key="scatter_matrix_sample_n",
-            )
-            sample_n = None if sample_n == 0 else int(sample_n)
-
-            if len(cols) < 2:
-                st.warning("Seleziona almeno 2 colonne numeriche.")
-            elif len(cols) > 8:
-                st.warning("Hai selezionato molte variabili: il grafico può diventare lento o difficile da leggere.")
-                fig = build_scatter_matrix(
+                fig = build_histogram(
                     df_plot,
-                    cols=cols,
+                    x=x,
+                    nbins=nbins,
                     color=color,
                     opacity=opacity,
-                    sample_n=sample_n,
-                    diagonal_visible=diagonal_visible,
-                    show_upper_half=show_upper_half,
-                    color_discrete_map=matrix_color_map,
+                    histnorm=histnorm,
+                    marginal_mode=marginal_mode,
+                    barmode=barmode,
+                    color_discrete_map=hist_color_map,
 
                 )
-                code_snippet = scatter_matrix_code(
-                    cols=cols,
+
+                code_snippet = histogram_code(
+                    x=x,
+                    nbins=nbins,
                     color=color,
                     opacity=opacity,
-                    sample_n=sample_n,
-                    diagonal_visible=diagonal_visible,
-                    show_upper_half=show_upper_half,
-                    color_discrete_map=matrix_color_map,
+                    histnorm=histnorm,
+                    marginal_mode=marginal_mode,
+                    barmode=barmode,
+                    color_discrete_map=hist_color_map,
 
                 )
+
+        elif chart_type == "Count Bar":
+            if not cat_like_cols:
+                st.warning("Nessuna colonna categorica/string/boolean disponibile.")
             else:
-                fig = build_scatter_matrix(
+                x = st.selectbox("Variabile categorica", cat_like_cols)
+                top_k = st.slider("Top K categorie", 5, 100, 20)
+
+                fig = build_count_bar(df_plot, x=x, top_k=top_k)
+                code_snippet = count_bar_code(x=x, top_k=top_k)
+
+        elif chart_type == "Pareto":
+            if not cat_like_cols:
+                st.warning("Nessuna colonna categorica/string/boolean disponibile.")
+            else:
+                x = st.selectbox("Variabile categorica", cat_like_cols)
+                top_k = st.slider("Top K categorie", 5, 100, 20)
+
+                fig = build_pareto(df_plot, x=x, top_k=top_k)
+                code_snippet = pareto_code(x=x, top_k=top_k)
+
+        elif chart_type == "Boxplot":
+            if not num_cols:
+                st.warning("Nessuna colonna numerica disponibile.")
+            else:
+                y = st.selectbox("Variabile numerica (y)", num_cols)
+                x_group = st.selectbox("Grouping (opzionale, cat/string/bool)", [None] + cat_like_cols)
+
+                fig = build_boxplot(df_plot, y=y, x=x_group)
+                code_snippet = boxplot_code(y=y, x_group=x_group)
+
+        elif chart_type == "Scatter":
+            if len(num_cols) < 2:
+                st.warning("Servono almeno 2 colonne numeriche.")
+            else:
+                x = st.selectbox("X (numerica)", num_cols)
+                y_candidates = [c for c in num_cols if c != x]
+                y = st.selectbox("Y (numerica)", y_candidates)
+
+                facet_candidates = [None] + cat_like_cols
+                color = st.selectbox("Color (opzionale)", facet_candidates)
+                scatter_color_map = categorical_color_map_ui(df_plot, color, key_prefix="scatter")
+                facet_col = st.selectbox("Facet col (opzionale)", facet_candidates)
+                facet_row = st.selectbox("Facet row (opzionale)", facet_candidates)
+
+                if facet_row is not None and facet_col is not None and facet_row == facet_col:
+                    st.warning("Facet row e facet col non dovrebbero essere la stessa colonna.")
+
+                opacity = st.slider("Opacità punti", 0.05, 1.00, 0.30, 0.05)
+
+                facet_col_wrap = None
+                if facet_col is not None and facet_row is None:
+                    use_wrap = st.checkbox("Usa facet_col_wrap", value=False)
+                    if use_wrap:
+                        facet_col_wrap = st.slider("Facet col wrap", 2, 6, 3)
+
+                sample_n = st.number_input("Sample max (0 = no sample)", min_value=0, value=3000, step=100)
+                sample_n = None if sample_n == 0 else int(sample_n)
+
+                too_many = []
+                for fc_name, fc_val in [("facet_col", facet_col), ("facet_row", facet_row)]:
+                    if fc_val is not None:
+                        n_levels = int(df_plot[fc_val].astype("string").nunique(dropna=True))
+                        if n_levels > 12:
+                            too_many.append((fc_name, fc_val, n_levels))
+
+                if too_many:
+                    msg = " | ".join([f"{n}='{c}' ha {k} livelli" for n, c, k in too_many])
+                    st.warning(f"Attenzione: troppi facet possono rendere il grafico poco leggibile ({msg}).")
+
+                fig = build_scatter(
                     df_plot,
-                    cols=cols,
+                    x=x,
+                    y=y,
                     color=color,
+                    facet_col=facet_col,
+                    facet_row=facet_row,
+                    facet_col_wrap=facet_col_wrap,
                     opacity=opacity,
                     sample_n=sample_n,
-                    diagonal_visible=diagonal_visible,
-                    show_upper_half=show_upper_half,
-                    color_discrete_map=matrix_color_map,
+                    color_discrete_map=scatter_color_map,
 
                 )
-                code_snippet = scatter_matrix_code(
-                    cols=cols,
+                code_snippet = scatter_code(
+                    x=x,
+                    y=y,
                     color=color,
+                    facet_col=facet_col,
+                    facet_row=facet_row,
+                    facet_col_wrap=facet_col_wrap,
                     opacity=opacity,
                     sample_n=sample_n,
-                    diagonal_visible=diagonal_visible,
-                    show_upper_half=show_upper_half,
-                    color_discrete_map=matrix_color_map,
+                    color_discrete_map=scatter_color_map,
 
                 )
-                
-    elif chart_type == "Correlation Heatmap":
-        if len(num_cols) < 2:
-            st.warning("Servono almeno 2 colonne numeriche.")
-        else:
-            default_cols = num_cols[: min(8, len(num_cols))]
-            cols = st.multiselect("Colonne numeriche", num_cols, default=default_cols)
 
-            if len(cols) >= 2:
-                fig = build_corr_heatmap(df_plot, cols)
-                code_snippet = corr_heatmap_code(cols=cols)
+        elif chart_type == "Scatter Matrix":
+            if len(num_cols) < 2:
+                st.warning("Servono almeno 2 colonne numeriche.")
             else:
-                st.warning("Seleziona almeno 2 colonne numeriche per la heatmap.")
+                default_cols = num_cols[: min(5, len(num_cols))]
+                cols = st.multiselect(
+                    "Colonne numeriche (2-8 consigliate)",
+                    num_cols,
+                    default=default_cols,
+                    help="Troppe colonne rendono la scatter matrix lenta e poco leggibile.",
+                )
+
+                color = st.selectbox("Color (opzionale)", [None] + cat_like_cols)
+                matrix_color_map = categorical_color_map_ui(df_plot, color, key_prefix="scatter_matrix")
+
+                opacity = st.slider("Opacità punti (matrix)", 0.05, 1.00, 0.35, 0.05)
+
+                diagonal_visible = st.checkbox("Mostra diagonale", value=True)
+                show_upper_half = st.checkbox("Mostra triangolo superiore", value=False)
+
+                sample_n = st.number_input(
+                    "Sample max (0 = no sample)",
+                    min_value=0,
+                    value=2000,
+                    step=100,
+                    key="scatter_matrix_sample_n",
+                )
+                sample_n = None if sample_n == 0 else int(sample_n)
+
+                if len(cols) < 2:
+                    st.warning("Seleziona almeno 2 colonne numeriche.")
+                elif len(cols) > 8:
+                    st.warning("Hai selezionato molte variabili: il grafico può diventare lento o difficile da leggere.")
+                    fig = build_scatter_matrix(
+                        df_plot,
+                        cols=cols,
+                        color=color,
+                        opacity=opacity,
+                        sample_n=sample_n,
+                        diagonal_visible=diagonal_visible,
+                        show_upper_half=show_upper_half,
+                        color_discrete_map=matrix_color_map,
+
+                    )
+                    code_snippet = scatter_matrix_code(
+                        cols=cols,
+                        color=color,
+                        opacity=opacity,
+                        sample_n=sample_n,
+                        diagonal_visible=diagonal_visible,
+                        show_upper_half=show_upper_half,
+                        color_discrete_map=matrix_color_map,
+
+                    )
+                else:
+                    fig = build_scatter_matrix(
+                        df_plot,
+                        cols=cols,
+                        color=color,
+                        opacity=opacity,
+                        sample_n=sample_n,
+                        diagonal_visible=diagonal_visible,
+                        show_upper_half=show_upper_half,
+                        color_discrete_map=matrix_color_map,
+
+                    )
+                    code_snippet = scatter_matrix_code(
+                        cols=cols,
+                        color=color,
+                        opacity=opacity,
+                        sample_n=sample_n,
+                        diagonal_visible=diagonal_visible,
+                        show_upper_half=show_upper_half,
+                        color_discrete_map=matrix_color_map,
+
+                    )
+                    
+        elif chart_type == "Correlation Heatmap":
+            if len(num_cols) < 2:
+                st.warning("Servono almeno 2 colonne numeriche.")
+            else:
+                default_cols = num_cols[: min(8, len(num_cols))]
+                cols = st.multiselect("Colonne numeriche", num_cols, default=default_cols)
+
+                if len(cols) >= 2:
+                    fig = build_corr_heatmap(df_plot, cols)
+                    code_snippet = corr_heatmap_code(cols=cols)
+                else:
+                    st.warning("Seleziona almeno 2 colonne numeriche per la heatmap.")
 
     # -----------------------
     # Render output + code snippet
     # -----------------------
-    if fig is not None:
-        fig.update_layout(
-            height=chart_height_user,
-            margin=dict(l=30, r=30, t=70, b=30),
-        )
+    with plot_col:
+        st.subheader("Anteprima")
 
-        st.plotly_chart(fig, width="stretch")
+        if fig is not None:
+            fig.update_layout(
+                height=chart_height_user,
+                margin=dict(l=20, r=20, t=60, b=20),
+            )
+            st.plotly_chart(fig, width="stretch")
+        else:
+            st.info("Configura il grafico nella colonna di sinistra.")
+
+    # -----------------------
+    # Code snippet FULL WIDTH (sotto le colonne)
+    # -----------------------
+    if fig is not None:
+        st.markdown("---")
         st.markdown("### Codice Python (copiabile nel notebook)")
         st.code(code_snippet or "# Nessun codice disponibile", language="python")
